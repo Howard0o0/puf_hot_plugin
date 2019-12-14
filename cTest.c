@@ -141,7 +141,7 @@ int main(int argc, char *argv[])
     int    fd, c=0, res;
  
     uint8_t  buf[256];
-    char puf[] = {0x0a,0xaa,0x11,0x22,0x33,0x44,0x55,0x66,0x77,0x88,0x88};
+    uint8_t puf[] = {0x0a,0xaa,0x11,0x22,0x33,0x44,0x55,0x66,0x77,0x88,0x88};
 
  
     printf("Start...\n");
@@ -162,7 +162,8 @@ int main(int argc, char *argv[])
     printf("Reading...\n");
     while(1) {
         write(fd,puf,11);
-        res = read(fd, buf, 255);
+        res = read(fd, buf, 10);
+		printf("[%d] : ",res);
         print_hex(buf,res);
         sleep(1);
 
