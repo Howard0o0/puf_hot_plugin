@@ -145,7 +145,7 @@ int main(int argc, char *argv[])
 
  
     printf("Start...\n");
-    fd = open(UART_DEVICE, O_RDWR);
+    fd = open(UART_DEVICE, O_RDWR) ;
  
     if (fd < 0) {
         perror(UART_DEVICE);
@@ -162,6 +162,8 @@ int main(int argc, char *argv[])
     printf("Reading...\n");
     while(1) {
         write(fd,puf,11);
+		printf("send : ");
+		print_hex(puf,11);
         res = read(fd, buf, 10);
 		printf("[%d] : ",res);
         print_hex(buf,res);
