@@ -22,6 +22,11 @@
 #include<errno.h>      /*错误号定义*/    
 #include<string.h>
 #include <stdint.h>
+#include <sys/types.h>
+#include <asm/types.h>
+//该头文件需要放在netlink.h前面防止编译出现__kernel_sa_family未定义
+#include <sys/socket.h>  
+#include <linux/netlink.h>
  
 void print_hex(uint8_t *str, uint8_t len)
 {
@@ -34,8 +39,51 @@ void print_hex(uint8_t *str, uint8_t len)
     printf("\r\n");
 }
 
+void MonitorNetlinkUevent()
+{
+    int sockfd;
+    struct sockaddr_nl sa;
+    int len;
+    char buf[4096];
+    struct iovec iov;
+    struct msghdr msg;
+    int i;
+
+    memset(&sa,0,sizeof(sa));
+    sa.nl_family=AF_NETLINK;
+    sa.nl_groups=NETLINK_KOBJECT_UEVENT;
+    sa.nl_pid = 0;//getpid(); both is ok
+    memset(&msg,0,sizeof(msg));
+    iov.iov_base=(void *)buf;
+    iov.iov_len=sizeof(buf);
+    msg.msg_name=(void *)&sa;
+    msg.msg_namelen=sizeof(sa);
+    msg.msg_iov=&iov;
+    msg.msg_iovlen=1;
+
+    sockfd=socket(AF_NETLINK,SOCK_RAW,NETLINK_KOBJECT_UEVENT);
+    if(sockfd==-1)
+        printf("socket creating failed:%s\n",strerror(errno));
+    if(bind(sockfd,(struct sockaddr *)&sa,sizeof(sa))==-1)
+        printf("bind error:%s\n",strerror(errno));
+
+    len=recvmsg(sockfd,&msg,0);
+    if(len<0)
+        printf("receive error\n");
+    else if(len<32||len>sizeof(buf))
+        printf("invalid message");
+    for(i=0;i<len;i++)
+        if(*(buf+i)=='\0')
+            buf[i]='\n';
+    printf("received %d bytes\n%s\n",len,buf);
+}
+
+
 int wait_usb_plugin(){
 	int fd = -1;
+
+    MonitorNetlinkUevent();
+
 	while ( (fd = UART0_Open(fd,"/dev/ttyUSB0") ) < 0){
 		sleep(1);
 	}
@@ -54,6 +102,7 @@ uint8_t *get_puf_response(int fd){
 	uint8_t  buf[256];
 	uint8_t *resp = (uint8_t *)calloc(5,sizeof(uint8_t));
     uint8_t puf[] = {0x0a,0xaa,0x11,0x22,0x33,0x44,0x55,0x66,0x77,0x88,0x88};
+    uint8_t err_times = 0;
 
 	while (1)
 	{
@@ -62,6 +111,9 @@ uint8_t *get_puf_response(int fd){
 		printf("send challenge cmd :");
 		print_hex(puf,11);
 		if ( UART0_Recv(fd, (char *)buf, 10) != buf[0]+1 ){
+            if(err_times++ > 3){
+                return resp;
+            }
 			continue;
 		}
 		printf("receive puf response : ");
@@ -78,7 +130,7 @@ uint8_t *get_puf_response(int fd){
 uint8_t calc_hamming_dist_between_two_bytes(uint8_t byte_a,uint8_t byte_b){
 	uint8_t hamming_dist_one_byte = 0;
 	for(uint8_t i = 0;i < 8;i++){
-		if ( ( (byte_a >> i) & (byte_b >> i) ) & 0x1){
+		if ( ((byte_a>>i)&0x1) ^ ((byte_b>>i)&0x1) ){
 			hamming_dist_one_byte++;
 		}
 	}
@@ -92,13 +144,15 @@ uint8_t calc_hamming_dist(const uint8_t *std_resp,const uint8_t *unsure_resp,uin
 	{
 		hamming_dist += calc_hamming_dist_between_two_bytes(std_resp[i],unsure_resp[i]);
 	}
+
+    printf("hamming_dist : %d \r\n",hamming_dist);
 	return hamming_dist;
 	
 }
 
 int match_response(uint8_t *resp){
-	const uint8_t std_resp[] = {0xc, 0x8d, 0xd, 0x4c};
-	if( calc_hamming_dist(std_resp,resp,4) < 3 ){
+	const uint8_t std_resp[] = {0xc, 0x8d, 0xa, 0x4c};
+	if( calc_hamming_dist(std_resp,resp,4) <= 3 ){
 		return 1;
 	}
 	else
@@ -109,7 +163,7 @@ int match_response(uint8_t *resp){
 }
 
 void report_result(uint8_t result){
-	if(result < 3){
+	if(result == 1){
 		printf("usb device was trusted \r\n");
 	}
 	else{
@@ -117,10 +171,11 @@ void report_result(uint8_t result){
 	}
 }
 
+
 ////////////////////////////////////////////////////////////////////////////////
 int main(int argc, char *argv[])
 {
- 
+
     int    fd, c=0, res;
  
     uint8_t  buf[256];
@@ -141,88 +196,10 @@ int main(int argc, char *argv[])
 		report_result(result);
 
 		close(fd);
+
+        MonitorNetlinkUevent();
 	}
  
     return 0;
 }
 
-// int main(int argc, char **argv)    
-// {
-// 	int fd = -1;           //文件描述符，先定义一个与程序无关的值，防止fd为任意值导致程序出bug    
-//     int err;               //返回调用函数的状态    
-//     int len;                            
-//     int i;    
-//     char rcv_buf[256];             
-//     char send_buf[256];
-//     char challenge[] = {0x0a,0xaa,0x11,0x22,0x33,0x44,0x55,0x66,0x77,0x88,0x88};
-
-    
-
-//     fd = UART0_Open(fd,"/dev/ttyUSB0");
-//     UART0_Init(fd,115200,0,8,1,'N');   
-//     while (1)
-//     {
-        
-//         len = UART0_Send(fd,challenge,11);
-//         printf("send [%d] : ",len);
-//         print_hex(challenge,len);
-
-//         len = UART0_Recv(fd, rcv_buf,sizeof(rcv_buf));   
-//         printf("rcv [%d] : ",len);
-//         print_hex(rcv_buf,len);
-
-//         sleep(1); 
-//     }
-
-
-//     if(argc != 3)    
-//     {    
-//         printf("Usage: %s /dev/ttySn 1(send data)/1 (receive data) \n",argv[0]);
-//         printf("open failure : %s\n", strerror(errno));
-    
-//         return FALSE;    
-//     }    
-//      fd = UART0_Open(fd,argv[1]); //打开串口，返回文件描述符   
-//      // fd=open("dev/ttyS1", O_RDWR);
-//     //printf("fd= \n",fd);
-//      do  
-//     {    
-//         err = UART0_Init(fd,115200,0,8,1,'N');    
-//         printf("Set Port Exactly!\n"); 
-//         sleep(1);   
-//     }while(FALSE == err || FALSE == fd);    
-       
-//     if(0 == strcmp(argv[2],"0"))    //开发板向pc发送数据的模式
-//     {   
-//         fgets(send_buf,256,stdin);   //输入内容，最大不超过40字节，fgets能吸收回车符，这样pc收到的数据就能自动换行     
-//         for(i = 0;i < 10;i++)    
-//         {    
-//             len = UART0_Send(fd,send_buf,40);    
-//             if(len > 0)    
-//                 printf(" %d time send %d data successful\n",i,len);    
-//             else    
-//                 printf("send data failed!\n");    
-                              
-//             sleep(1);    
-//         }    
-//         UART0_Close(fd);                 
-//     }    
-//     else                            //开发板收到pc发送的数据的模式                 
-//     {                                          
-//         while (1) //循环读取数据    
-//         {   
-//             len = UART0_Recv(fd, rcv_buf,sizeof(rcv_buf));    
-//             if(len > 0)    
-//             {    
-//                 rcv_buf[len] = '\0';    
-//                 printf("receive data is %s\n",rcv_buf);    
-//             }    
-//             else    
-//             {    
-//                 printf("cannot receive data\n");    
-//             }    
-//             sleep(1);    
-//         }                
-//         UART0_Close(fd);     
-//     }    
-// }    
